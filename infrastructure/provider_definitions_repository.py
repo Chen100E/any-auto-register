@@ -18,6 +18,24 @@ _BUILTIN_DEFINITIONS: list[dict] = [
     # ── mailbox ──────────────────────────────────────────────────────
     {
         "provider_type": "mailbox",
+        "provider_key": "mailcatch",
+        "label": "MailCatch（CF catch-all）",
+        "description": "Cloudflare Email Routing catch-all + Worker + KV，任意地址都能收信，无需预先建箱",
+        "driver_type": "mailcatch",
+        "default_auth_mode": "",
+        "enabled": True,
+        "category": "selfhost",
+        "auth_modes": [],
+        "fields": [
+            {"key": "mailcatch_url", "label": "Worker 地址", "placeholder": "https://mailcatch.xxx.workers.dev", "category": "connection"},
+            {"key": "mailcatch_domain", "label": "收信域名", "placeholder": "ping1.pp.ua", "category": "connection"},
+            {"key": "mailcatch_prefix", "label": "邮箱前缀", "placeholder": "mc", "category": "connection"},
+            {"key": "mailcatch_timeout", "label": "收码超时（秒）", "placeholder": "150", "category": "connection"},
+            {"key": "mailcatch_poll_interval", "label": "轮询间隔（秒）", "placeholder": "3", "category": "connection"},
+        ],
+    },
+    {
+        "provider_type": "mailbox",
         "provider_key": "cfworker_admin_api",
         "label": "CF Worker（自建域名）",
         "description": "基于 Cloudflare Worker 的自定义域名邮箱，需自行部署 Worker 后端",
