@@ -151,11 +151,17 @@ class MailCatchMailbox(BaseMailbox):
             if match:
                 return match.group(1) if match.groups() else match.group(0)
             return ""
+        # Worker 抽出来的 otp 不一定是验证码（邮件里的年份、订单号都可能被抓到），
+        # 所以只把它当兜底：先按 6 位验证码在主题+正文里找，找不到再用它。
         otp = str(mail.get("otp") or "").strip()
-        if otp:
+        if otp.isdigit() and len(otp) == 6:
             return otp
         match = re.search(r"(?<!\d)(\d{6})(?!\d)", hay)
-        return match.group(1) if match else ""
+        if match:
+            return match.group(1)
+        if otp.isdigit() and 4 <= len(otp) <= 8:
+            return otp
+        return ""
 
     def wait_for_link(self, account: MailboxAccount, keyword: str = "",
                       timeout: int = 120, before_ids: set = None) -> str:
