@@ -1068,6 +1068,56 @@ class DuckMailMailbox(BaseMailbox):
         raise TimeoutError(f"等待验证链接超时 ({timeout}s)")
 
 
+_CODE_SIX_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+_CODE_BOUNDARY_RE = re.compile(r"^--[\w=.-]+.*$", re.M)
+_CODE_HEADER_RE = re.compile(r"^[A-Za-z-]+:.*$", re.M)
+_CODE_BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]{40,}$", re.M)
+_CODE_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_CODE_LONGNUM_RE = re.compile(r"\d{9,}")
+_CODE_KEYWORD_RE = re.compile(
+    r"(?:code|verification|verify|otp|passcode|验证码|校验码|确认码)[^0-9]{0,30}(\d{6})",
+    re.I,
+)
+
+
+def extract_verification_code(raw: str, code_pattern: str | None = None) -> str:
+    """从原始邮件里提验证码。
+
+    顺序：Subject 的 6 位码 -> 剥离 MIME 噪声后按关键词邻近 -> 兜底第一个独立 6 位码。
+    """
+    import re as _re
+
+    subject_match = _re.search(r"^Subject:\s*(.*)$", raw, _re.M)
+    if subject_match:
+        hit = _CODE_SIX_RE.search(subject_match.group(1))
+        if hit:
+            return hit.group(1)
+
+    body = raw
+    split = raw.find("\r\n\r\n")
+    if split != -1:
+        body = raw[split:]
+    body = _CODE_BOUNDARY_RE.sub(" ", body)
+    body = _CODE_HEADER_RE.sub(" ", body)
+    body = _CODE_BASE64_RE.sub(" ", body)
+    body = _CODE_EMAIL_RE.sub(" ", body)
+    body = _CODE_LONGNUM_RE.sub(" ", body)
+    body = _re.sub(r"m=\+\d+\.\d+", " ", body)
+    body = _re.sub(r"\bt=\d+\b", " ", body)
+
+    if code_pattern:
+        hit = _re.search(code_pattern, body)
+        if hit:
+            return hit.group(1) if hit.groups() else hit.group(0)
+
+    hit = _CODE_KEYWORD_RE.search(body)
+    if hit:
+        return hit.group(1)
+
+    hit = _CODE_SIX_RE.search(body)
+    return hit.group(1) if hit else ""
+
+
 class CFWorkerMailbox(BaseMailbox):
     """Cloudflare Worker 自建临时邮箱服务"""
 
@@ -1079,6 +1129,16 @@ class CFWorkerMailbox(BaseMailbox):
         self.fingerprint = fingerprint
         self.proxy = {"http": proxy, "https": proxy} if proxy else None
         self._token = None
+        self._session = self._new_session()
+
+    def _new_session(self):
+        import requests
+        session = requests.Session()
+        # 不继承 HTTP(S)_PROXY 环境变量：sandbox 的出口代理只支持 CONNECT，会 426
+        session.trust_env = False
+        if self.proxy:
+            session.proxies.update(self.proxy)
+        return session
 
     def _headers(self) -> dict:
         h = {
@@ -1091,14 +1151,13 @@ class CFWorkerMailbox(BaseMailbox):
         return h
 
     def get_email(self) -> MailboxAccount:
-        import requests, random, string
+        import random, string
         name = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
         payload = {"enablePrefix": True, "name": name}
         if self.domain:
             payload["domain"] = self.domain
-        r = requests.post(f"{self.api}/admin/new_address",
-            json=payload, headers=self._headers(),
-            proxies=self.proxy, timeout=15)
+        r = self._session.post(f"{self.api}/admin/new_address",
+            json=payload, headers=self._headers(), timeout=15)
         print(f"[CFWorker] new_address status={r.status_code} resp={r.text[:200]}")
         data = r.json()
         email = data.get("email", data.get("address", ""))
@@ -1127,10 +1186,9 @@ class CFWorkerMailbox(BaseMailbox):
         )
 
     def _get_mails(self, email: str) -> list:
-        import requests
-        r = requests.get(f"{self.api}/admin/mails",
+        r = self._session.get(f"{self.api}/admin/mails",
             params={"limit": 20, "offset": 0, "address": email},
-            headers=self._headers(), proxies=self.proxy, timeout=10)
+            headers=self._headers(), timeout=10)
         data = r.json()
         return data.get("results", data) if isinstance(data, dict) else data
 
@@ -1155,20 +1213,13 @@ class CFWorkerMailbox(BaseMailbox):
                         continue
                     seen.add(mid)
                     raw = str(mail.get("raw", ""))
-                    # 1. 优先匹配 <span>XXXXXX</span> （Trae 邮件格式）
+                    # 优先 <span>XXXXXX</span>（Trae 邮件格式）
                     code_m = re.search(r'<span[^>]*>\s*(\d{6})\s*</span>', raw)
                     if code_m:
                         return code_m.group(1)
-                    # 2. 跳过 MIME header，只搜 body 部分，避免匹配时间戳
-                    body_start = raw.find('\r\n\r\n')
-                    search_text = raw[body_start:] if body_start != -1 else raw
-                    search_text = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '', search_text)
-                    # 排除时间戳模式 m=+XXXXXX. 和 t=XXXXXXXXXX
-                    search_text = re.sub(r'm=\+\d+\.\d+', '', search_text)
-                    search_text = re.sub(r'\bt=\d+\b', '', search_text)
-                    m = re.search(code_pattern or r'(?<!#)(?<!\d)(\d{6})(?!\d)', search_text)
-                    if m:
-                        return m.group(1) if m.groups() else m.group(0)
+                    code = extract_verification_code(raw, code_pattern)
+                    if code:
+                        return code
             except Exception:
                 pass
             time.sleep(3)
