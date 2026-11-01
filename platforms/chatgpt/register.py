@@ -184,6 +184,45 @@ class _SentinelTokenGenerator:
         return "gAAAAAB" + self._b64(None)
 
 
+PASSWORDLESS_VERIFY_MODES = ("passwordless_signup",)
+
+
+def classify_signup_page(response_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """判定 authorize/continue 返回的页面语义。
+
+    返回 {page_type, is_existing_account, passwordless_signup, verify_mode}。
+
+    OpenAI 会把 email_otp_verification 用于两种完全不同的场景：
+      - 老账号登录：需要收验证码才能登录
+      - 新的无密码注册（passwordless_signup）：邮箱验证通过后才让设密码
+    两者页面类型相同，只能靠 email_verification_mode 区分。判错会把
+    passwordless 新注册当成"已注册账号"，跳过设密码和发码，最后空等验证码。
+    """
+    data = response_data or {}
+    page = data.get("page") or {}
+    session = data.get("oai-client-auth-session") or {}
+    page_type = str(page.get("type") or "")
+    payload = page.get("payload") or {}
+
+    verify_mode = str(
+        payload.get("email_verification_mode")
+        or session.get("email_verification_mode")
+        or ""
+    )
+    passwordless = bool(
+        verify_mode in PASSWORDLESS_VERIFY_MODES
+        or session.get("passwordless_signup_from_default_redirect")
+    )
+
+    is_existing = page_type == OPENAI_PAGE_TYPES["EMAIL_OTP_VERIFICATION"] and not passwordless
+    return {
+        "page_type": page_type,
+        "is_existing_account": is_existing,
+        "passwordless_signup": passwordless,
+        "verify_mode": verify_mode,
+    }
+
+
 class RegistrationEngine:
     """
     注册引擎
@@ -242,6 +281,9 @@ class RegistrationEngine:
         self._create_account_continue_url: Optional[str] = None
         self._otp_continue_url: Optional[str] = None
         self._otp_page_type: Optional[str] = None
+        self._passwordless_signup: bool = False  # 站点走的是无密码注册（密码在 OTP 之后设）
+        self._password_after_otp: bool = False   # 本次流程需要等 OTP 通过后再设密码
+        self._signup_verify_mode: str = ""       # email_verification_mode 原值
 
     def _log(self, message: str, level: str = "info"):
         """记录日志"""
@@ -525,13 +567,25 @@ class RegistrationEngine:
 
             try:
                 response_data = response.json()
-                page_type = response_data.get("page", {}).get("type", "")
-                self._log(f"响应页面类型: {page_type}")
+                verdict = classify_signup_page(response_data)
+                page_type = verdict["page_type"]
+                self._signup_verify_mode = verdict["verify_mode"]
+                self._passwordless_signup = verdict["passwordless_signup"]
+                is_existing = verdict["is_existing_account"]
+                self._log(
+                    f"响应页面类型: {page_type}"
+                    + (f" | email_verification_mode={verdict['verify_mode']}"
+                       if verdict["verify_mode"] else "")
+                )
 
-                is_existing = page_type == OPENAI_PAGE_TYPES["EMAIL_OTP_VERIFICATION"]
                 if is_existing:
-                    self._log(f"检测到已注册账号，将自动切换到登录流程")
+                    self._log("检测到已注册账号，将自动切换到登录流程")
                     self._is_existing_account = True
+                elif self._passwordless_signup:
+                    self._log(
+                        "检测到 passwordless 注册：邮箱验证通过后才设置密码，"
+                        "需显式请求验证码"
+                    )
 
                 return SignupFormResult(
                     success=True,
@@ -621,6 +675,8 @@ class RegistrationEngine:
                         resp_data = response.json()
                         page_type = resp_data.get("page", {}).get("type", "")
                         self._log(f"注册响应页面类型: {page_type}")
+                        if page_type:
+                            self._otp_page_type = page_type
                         if page_type == OPENAI_PAGE_TYPES.get("EMAIL_OTP_VERIFICATION", "email_otp_verification"):
                             self._log("检测到已注册账号，自动切换到登录流程")
                             self._is_existing_account = True
@@ -685,6 +741,20 @@ class RegistrationEngine:
             )
 
             self._log(f"验证码发送状态: {response.status_code}")
+            # passwordless 场景下服务端可能收下请求却不排队发信（风控静默拦截），
+            # 这个标记是唯一能提前看出来的信号，别等到超时才怀疑。
+            try:
+                payload = response.json() or {}
+                session_info = payload.get("oai-client-auth-session") or {}
+                pending = session_info.get("passwordless_email_otp_send_pending")
+                if pending is not None:
+                    self._log(
+                        f"passwordless_email_otp_send_pending={pending}"
+                        + ("（false：服务端没有排队发信，多半被风控静默拦截）" if not pending else ""),
+                        "info" if pending else "warning",
+                    )
+            except Exception:
+                pass
             return response.status_code == 200
 
         except Exception as e:
@@ -1281,8 +1351,13 @@ class RegistrationEngine:
                 return result
 
             # 8. [已注册账号跳过] 注册密码
+            self._password_after_otp = False
             if self._is_existing_account:
                 self._log("8. [已注册账号] 跳过密码设置，OTP 已自动发送")
+            elif self._passwordless_signup:
+                # 无密码注册：提前调 user/register 会被服务端拒（400 account_creation_failed）
+                self._password_after_otp = True
+                self._log("8. [passwordless] 密码留到邮箱验证通过后再设置")
             else:
                 self._log("8. 注册密码...")
                 password_ok, password = self._register_password()
@@ -1296,7 +1371,7 @@ class RegistrationEngine:
                 # 已注册账号的 OTP 在提交表单时已自动发送，记录时间戳
                 self._otp_sent_at = time.time()
             else:
-                self._log("9. 发送验证码...")
+                self._log("9. 发送验证码..." + ("（passwordless 注册）" if self._passwordless_signup else ""))
                 if not self._send_verification_code():
                     result.error_message = "发送验证码失败"
                     return result
@@ -1314,8 +1389,18 @@ class RegistrationEngine:
                 result.error_message = "验证验证码失败"
                 return result
 
+            # 11.5 passwordless 注册：验证码通过后才出现设置密码页
+            if self._password_after_otp:
+                self._log(f"11.5 [passwordless] OTP 通过，page_type={self._otp_page_type}，设置密码...")
+                password_ok, password = self._register_password()
+                if not password_ok:
+                    result.error_message = "注册密码失败（passwordless 验证后设置阶段）"
+                    return result
+                self._log(f"11.5 [passwordless] 密码设置完成，page_type={self._otp_page_type}")
+
             # 12. 根据 OTP 响应决定下一步
-            if self._otp_page_type == "about_you" and not self._is_existing_account:
+            if (self._otp_page_type == "about_you" or self._password_after_otp) \
+                    and not self._is_existing_account:
                 # 正常注册流程: about_you → create_account
                 self._log("12. 创建用户账户...")
                 if not self._create_user_account():
