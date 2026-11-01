@@ -186,7 +186,7 @@ enabled = resolve_flag(extra, ("blink_use_captcha",), True)
 | cfsolve 可执行文件 | `CFSOLVE_BIN` | `providers/captcha/cfsolve.py` |
 | cfsolve 指纹 | `CFSOLVE_FP` | `providers/captcha/cfsolve.py` |
 
-cfsolve / mailcatch 的其余参数（`timeout` / `retries` / `api_url` / `domain` /
+cfsolve 的其余参数（`timeout` / `retries` / `api_url` / `domain` /
 `prefix` / `poll_interval`）走 provider 设置页，落在
 `ProviderSettingsRepository`，与上面两套等价。
 

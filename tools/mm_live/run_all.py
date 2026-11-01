@@ -31,12 +31,17 @@ MAIL_DOMAIN = os.getenv("MAIL_DOMAIN", "").strip()
 
 
 def resolve_mail_provider() -> str:
-    """MAIL_PROVIDER 显式指定 -> 设置页的默认 mailbox -> mailcatch。"""
+    """MAIL_PROVIDER 显式指定 -> 设置页的默认 mailbox。"""
     explicit = os.getenv("MAIL_PROVIDER", "").strip()
     if explicit:
         return explicit
     default = ProviderSettingsRepository().get_default_provider_key("mailbox")
-    return default or "mailcatch"
+    if default:
+        return default
+    raise RuntimeError(
+        "未配置默认 mailbox provider：请用 MAIL_PROVIDER 指定，"
+        "或在设置页把某个 mailbox provider 设为默认"
+    )
 
 
 MAIL_PROVIDER = resolve_mail_provider()

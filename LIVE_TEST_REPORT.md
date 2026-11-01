@@ -1,5 +1,9 @@
 # any-auto-register 全渠道真实注册测试报告
 
+> **后续变更（本文为历史快照，正文未回改）**：第 5 节的 mailcatch 邮箱 provider
+> 已被自建 `cloudflare_temp_email`（`cfworker_admin_api`）取代并从代码库删除，
+> 相关文件 `providers/mailbox/mailcatch.py` / `tests/test_mailcatch_code.py` 不再存在。
+
 测试时间：2026-11-01
 环境：ci13 容器，分支 `feat/cfsolve-moonmath`
 验证方式：**真实注册**——真实解 Turnstile、真实建号、真实收验证邮件，不使用 mock。
