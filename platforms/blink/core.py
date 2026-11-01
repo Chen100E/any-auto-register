@@ -19,7 +19,7 @@ from typing import Any, Callable
 from curl_cffi import requests as curl_requests
 
 BLINK_BASE = "https://blink.new"
-FIREBASE_API_KEY = "test"
+FIREBASE_API_KEY = "AIzaSyDW_pdI4eFUtrtmrwRG0a2dvMAgBsLq_hU"
 FIREBASE_SIGNIN_URL = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key={FIREBASE_API_KEY}"
 FIREBASE_REFRESH_URL = f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_API_KEY}"
 FIREBASE_CLIENT_VERSION = "Chrome/JsCore/11.10.0/FirebaseCore-web"
@@ -233,11 +233,17 @@ class BlinkRegister:
             headers["authorization"] = f"Bearer {access_token}"
         return headers
 
-    def step1_send_magic_link(self, email: str, *, redirect_url: str = "/") -> bool:
+    def step1_send_magic_link(
+        self, email: str, *, redirect_url: str = "/", turnstile_token: str = ""
+    ) -> bool:
+        """发送魔法链接。turnstile_token 非空时一并提交，绕过 Bot challenge。"""
         self.log(f"Step1: 发送魔法链接到 {email}")
+        payload: dict[str, Any] = {"email": email, "redirectUrl": redirect_url or "/"}
+        if turnstile_token:
+            payload["turnstileToken"] = turnstile_token
         response = self.s.post(
             f"{BLINK_BASE}/api/auth/main-app/magic-link",
-            json={"email": email, "redirectUrl": redirect_url or "/"},
+            json=payload,
             headers={
                 "accept": "*/*",
                 "content-type": "application/json",

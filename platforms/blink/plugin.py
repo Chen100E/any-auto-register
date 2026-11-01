@@ -22,6 +22,8 @@ class BlinkPlatform(BasePlatform):
     name = "blink"
     display_name = "Blink.new"
     version = "1.0.0"
+    supported_executors = ['protocol']
+    supported_identity_modes = ['mailbox']
 
     def __init__(self, config: RegisterConfig = None, mailbox: BaseMailbox = None):
         super().__init__(config)
@@ -58,7 +60,11 @@ class BlinkPlatform(BasePlatform):
         def _build_worker(ctx, artifacts):
             from platforms.blink.protocol_mailbox import BlinkProtocolMailboxWorker
 
-            return BlinkProtocolMailboxWorker(proxy=ctx.proxy, log_fn=ctx.log)
+            return BlinkProtocolMailboxWorker(
+                proxy=ctx.proxy,
+                log_fn=ctx.log,
+                captcha_solver=artifacts.captcha_solver,
+            )
 
         def _run_worker(worker, ctx, artifacts):
             return worker.run(
@@ -75,6 +81,7 @@ class BlinkPlatform(BasePlatform):
                 wait_message="等待魔法链接邮件...",
                 success_label="魔法链接",
             ),
+            use_captcha=True,
         )
 
     def _load_state(self, account: Account, *, force_refresh: bool = False) -> dict:

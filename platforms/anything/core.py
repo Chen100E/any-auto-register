@@ -396,18 +396,22 @@ class AnythingClient:
         referral_code: str = "",
         language: str = "zh-CN",
         post_login_redirect: str | None = None,
+        turnstile_token: str = "",
     ) -> dict[str, Any]:
         referral = str(referral_code).strip()
         self.log(f"Step1: 发起注册 {email}")
+        signup_input: dict[str, Any] = {
+            "email": email,
+            "postLoginRedirect": post_login_redirect,
+            "language": language,
+            "referralCode": referral,
+        }
+        if turnstile_token:
+            signup_input["turnstileToken"] = turnstile_token
         payload = {
             "operationName": "SignUpWithAppPrompt",
             "variables": {
-                "input": {
-                    "email": email,
-                    "postLoginRedirect": post_login_redirect,
-                    "language": language,
-                    "referralCode": referral,
-                }
+                "input": signup_input,
             },
             "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.6"}},
             "query": MUTATION_SIGN_UP_WITH_APP_PROMPT,

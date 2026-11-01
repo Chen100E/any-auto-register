@@ -6,12 +6,32 @@ from typing import Callable, Optional
 
 from platforms.blink.core import BLINK_BASE, BLINK_PRICE_IDS, BlinkRegister, summarize_blink_account_state
 
+# blink.new 注册页的 Turnstile sitekey（从 /_next/static/chunks/142zxfid0swms.js 提取）
+BLINK_TURNSTILE_SITEKEY = "0x4AAAAAACyVEYUXCeEWvxJe"
+BLINK_SIGNUP_PAGE = f"{BLINK_BASE}/sign-up"
+
 
 class BlinkProtocolMailboxWorker:
-    def __init__(self, *, proxy: str | None = None, log_fn: Callable[[str], None] = print):
+    def __init__(
+        self,
+        *,
+        proxy: str | None = None,
+        log_fn: Callable[[str], None] = print,
+        captcha_solver: object | None = None,
+    ):
         self.client = BlinkRegister(proxy=proxy)
         self.client._log = log_fn
         self.log = log_fn
+        self.captcha_solver = captcha_solver
+
+    def _solve_turnstile(self) -> str:
+        """解 blink 注册页的 Turnstile；没有 solver 时返回空串（旧行为）。"""
+        if self.captcha_solver is None:
+            return ""
+        self.log("解 Turnstile（blink 魔法链接接口要求）...")
+        token = self.captcha_solver.solve_turnstile(BLINK_SIGNUP_PAGE, BLINK_TURNSTILE_SITEKEY)
+        self.log(f"Turnstile token: {len(token)} 字符")
+        return token
 
     def run(
         self,
@@ -20,8 +40,9 @@ class BlinkProtocolMailboxWorker:
         link_callback: Optional[Callable[[], str]] = None,
     ) -> dict:
         """完整注册流程，返回持久化所需的 Blink 账号字段。"""
-        # Step 1: 触发魔法链接邮件
-        ok = self.client.step1_send_magic_link(email)
+        # Step 1: 解盾 + 触发魔法链接邮件
+        turnstile_token = self._solve_turnstile()
+        ok = self.client.step1_send_magic_link(email, turnstile_token=turnstile_token)
         if not ok:
             raise RuntimeError("发送魔法链接失败")
 

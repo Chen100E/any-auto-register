@@ -13,11 +13,31 @@ from platforms.anything.core import (
     summarize_anything_account_state,
 )
 
+# anything.com 注册页的 Turnstile sitekey（从首页 JS 包提取）
+ANYTHING_TURNSTILE_SITEKEY = "0x4AAAAAAC1lWjs4uSHxIEFw"
+
 
 class AnythingProtocolMailboxWorker:
-    def __init__(self, *, proxy: str | None = None, log_fn: Callable[[str], None] = print):
+    def __init__(
+        self,
+        *,
+        proxy: str | None = None,
+        log_fn: Callable[[str], None] = print,
+        captcha_solver: object | None = None,
+    ):
         self.client = AnythingClient(proxy=proxy, log_fn=log_fn)
         self.log = log_fn
+        self.captcha_solver = captcha_solver
+
+    def _solve_turnstile(self) -> str:
+        if self.captcha_solver is None:
+            return ""
+        self.log("解 Turnstile（anything 注册接口要求）...")
+        token = self.captcha_solver.solve_turnstile(
+            f"{ANYTHING_BASE}/signup", ANYTHING_TURNSTILE_SITEKEY
+        )
+        self.log(f"Turnstile token: {len(token)} 字符")
+        return token
 
     def run(
         self,
@@ -33,6 +53,7 @@ class AnythingProtocolMailboxWorker:
             referral_code=referral_code,
             language=language,
             post_login_redirect=post_login_redirect,
+            turnstile_token=self._solve_turnstile(),
         )
         if not link_callback:
             raise RuntimeError("link_callback is required")

@@ -1,0 +1,89 @@
+# any-auto-register 全渠道真实注册测试报告
+
+测试时间：2026-11-01
+环境：ci13 容器，分支 `feat/cfsolve-moonmath`
+验证方式：**真实注册**——真实解 Turnstile、真实建号、真实收验证邮件，不使用 mock。
+
+## 一、总体结果
+
+| # | 平台 | 结果 | 耗时 | 卡点 / 结论 |
+| --- | --- | --- | --- | --- |
+| 1 | MoonMath | ✅ 建成 | 36.1s | 账号可用；**站点按账号关闭 Free**，`POST /api/api-keys` 返回 402，拿不到 key |
+| 2 | Blink | ✅ 建成 | 37.1s | 全链路打通：Turnstile → 魔法链接 → Firebase → session → 建号 |
+| 3 | Trae | ✅ 建成 | 34.5s | 账号建成；平台不下发 API token（IDE 型产品） |
+| 4 | Anything | ❌ | 11.8s | 盾已过（错误从 `Missing Turnstile token` 变成 `SIGNUP_DISABLED`），**站点临时关闭邮箱注册** |
+| 5 | Cerebras | ❌ | 1.3s | 认证迁到 **reCAPTCHA**，且 Stytch 强制移动端标识；cfsolve 只解 Turnstile |
+| 6 | Tavily | ❌ | 130.4s | Auth0 流程失效，三个自有域名均收不到信 |
+| 7 | Grok | ❌ | 120.7s | 收不到验证码（同上，邮箱侧被拦） |
+| 8 | ChatGPT | ❌ | 123.2s | 收不到验证码（同上） |
+| 9 | Kiro | ❌ | 2.9s | `获取wsh失败` —— AWS WAF，非 Cloudflare |
+| 10 | Windsurf | ❌ | 31.5s | 上游改版为 Devin，`401 missing X-Devin-Auth1-Token` |
+| 11 | OpenBlock Labs | ❌ | 10.8s | Cloudflare 403，`initiate_signup failed` |
+
+**成功 3/11。** 失败原因全部在上游站点侧，不是整合层。
+
+## 二、这轮真正修好的东西
+
+### 1. Blink —— 从完全跑不通到全链路打通
+
+原仓库的 blink 插件有两处硬伤，导致 `403 Bot challenge failed`：
+
+- `step1_send_magic_link` 根本不带 Turnstile token。实测字段名是 **`turnstileToken`**，不是常见的 `captchaToken`/`cfToken`。
+- 上游把 `FIREBASE_API_KEY` 写成了 `"test"` 占位符，走到 Firebase 登录必然 400。
+
+修复：
+- `platforms/blink/core.py`：`step1_send_magic_link(..., turnstile_token="")`，非空时写入 `turnstileToken`。
+- `platforms/blink/protocol_mailbox.py`：新增 `captcha_solver` 参数与 `_solve_turnstile()`，sitekey `0x4AAAAAACyVEYUXCeEWvxJe`（从 `/_next/static/chunks/142zxfid0swms.js` 提取）。
+- `platforms/blink/plugin.py`：adapter 加 `use_captcha=True`，worker 注入 `artifacts.captcha_solver`。
+- 另写 `patch_blink_firebase.py`：从 `/_next/static/chunks/022w3w-n3f4v1.js` 提取真实 Firebase Web API Key 就地回写（不打印明文）。
+
+### 2. Anything —— 盾接上了，但站点自己关门
+
+- `platforms/anything/core.py`：`sign_up_with_prompt(..., turnstile_token="")`，写入 GraphQL `variables.input.turnstileToken`。
+- `platforms/anything/protocol_mailbox.py`：注入 `captcha_solver`，sitekey `0x4AAAAAAC1rJXwzHsS7ZTMm`。
+- 效果：错误从 `Missing Turnstile token` 变为 `SIGNUP_DISABLED: Email signup is temporarily disabled`。**整合层已通，卡在站点策略。**
+
+### 3. mailcatch 邮箱 provider 的链接提取
+
+`wait_for_link` 原来对 keyword 是硬过滤，blink 的链接里不含 `magic_token` 字面量就会漏信。改成**软匹配**：优先带关键词的链接，找不到退回第一条。
+
+### 4. 新增 7 项单测
+
+`tests/test_captcha_wiring.py` 覆盖 blink/anything 的 token 注入、空值不带字段、worker 解盾调用、无 solver 时降级。
+
+## 三、Magpie 接入情况
+
+magpie 只接受 **OpenAI 兼容端点 + API key**（66 个预设 + 自定义 `unlisted` provider，协议为 chat/responses/anthropic/gemini）。
+
+本轮 3 个建成账号里：
+
+| 平台 | 能否进 magpie | 原因 |
+| --- | --- | --- |
+| MoonMath | ✅ | `https://zro.moonmath.ai/v1`，OpenAI 兼容 |
+| Blink | ❌ | `/api/workspace/api-keys` 出的是自家 SDK key，无 chat 端点 |
+| Trae | ❌ | 不下发任何 API token |
+
+**新注册的 moonmath 账号拿不到 key**：`402 Add an active plan or usage pack before creating API keys.`
+
+magpie 里 `moonmath` provider 当前状态（已实测可用）：
+
+- 5 把 key（1 主 + 4 个 `keys[]`），来自 Free 政策收紧之前建的账号
+- `routing: drain` + `sink: true`
+- 实测：`moonmath/deepseek-v4.1-flash` → 正常返回
+
+## 四、为什么 8 个平台跑不通（根因分类）
+
+1. **上游改版，插件过期**（4 个）：Windsurf→Devin、Cerebras→reCAPTCHA、Tavily Auth0 流程、Kiro AWS WAF。
+2. **站点主动关闭注册**（1 个）：Anything 邮箱注册 disabled。
+3. **收不到验证邮件**（3 个）：ChatGPT / Grok / Tavily。已排除域名因素——`ping1.pp.ua`、`tany.de5.net`、`pip3.pp.ua` 三个域都试过，全部无信；而同期 MoonMath / Blink / Trae 秒收。说明是对端过滤，不是投递问题。
+4. **站点商业化收紧**（1 个）：MoonMath 新号不给 key。
+
+## 五、结论
+
+cfsolve 作为 captcha provider 的整合本身是有效的：它把 Blink 从「403 完全跑不通」推到「37 秒建成账号」，把 Anything 从「缺 token」推到「站点策略拦截」。真正的瓶颈不在解盾，而在：
+
+- 上游插件跟不上站点改版（协议层注册天然脆弱）；
+- 免费 TLD 域名被主流邮箱风控拉黑；
+- 站点把免费额度/API key 收紧成付费墙。
+
+要让更多渠道进 magpie，优先级应该是：**买一个正规 .com 域名做邮箱 → 修 Cerebras（reCAPTCHA，需换求解器）→ 修 Windsurf/Devin**。这三件里前两件收益最大。
