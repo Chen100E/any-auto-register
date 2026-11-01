@@ -33,8 +33,17 @@ class TavilyRegister:
             "code_challenge_method": "S256",
         }
         r = self.ex.get(f"{AUTH0_BASE}/authorize", params=params)
-        m = re.search(r'[?&]state=([^&]+)', r.headers.get("location", "") or str(r.text[:500]))
-        return urllib.parse.unquote(m.group(1)) if m else state_val
+        text = getattr(r, "text", "") or ""
+        loc = (r.headers.get("location", "") if hasattr(r, "headers") else "") or ""
+        # Auth0 事务 state（hKFo2SB...）优先；重定向被自动跟随时它只出现在 HTML 隐藏字段里
+        for source in (loc, text):
+            m = re.search(r"[?&]state=([A-Za-z0-9_\-\.%]+)", source or "")
+            if m:
+                return urllib.parse.unquote(m.group(1))
+        m = re.search(r'name="state"[^>]*value="([^"]+)"', text)
+        if m:
+            return m.group(1)
+        return state_val
 
     def step2_solve_captcha(self) -> str:
         self.log("获取 Turnstile token...")

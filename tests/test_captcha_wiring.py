@@ -151,5 +151,41 @@ class TestAnythingTurnstileWiring(unittest.TestCase):
         self.assertEqual(captcha.calls[0][1], ANYTHING_TURNSTILE_SITEKEY)
 
 
+class TestTavilyStateExtraction(unittest.TestCase):
+    """step1_authorize 必须拿到 Auth0 事务 state，而不是自编的 client state。"""
+
+    def _run(self, text, location=""):
+        from platforms.tavily.core import TavilyRegister
+
+        class _Resp:
+            def __init__(self):
+                self.text = text
+                self.headers = {"location": location} if location else {}
+
+        class _Ex:
+            def get(self, url, params=None):
+                return _Resp()
+
+        reg = TavilyRegister(executor=_Ex(), captcha=None, log_fn=lambda *_: None)
+        return reg.step1_authorize()
+
+    def test_prefers_location_header(self):
+        state = self._run("", location="https://auth.tavily.com/u/login/identifier?state=FROM_LOCATION")
+        self.assertEqual(state, "FROM_LOCATION")
+
+    def test_falls_back_to_hidden_input(self):
+        html = '<input type="hidden" name="state" value="hKFo2SBhZG1pbg" />'
+        self.assertEqual(self._run(html), "hKFo2SBhZG1pbg")
+
+    def test_falls_back_to_endpoint_in_body(self):
+        html = 'href="/u/login/identifier?state=hKFo2SBmcm9tYm9keSZ4"'
+        self.assertEqual(self._run(html), "hKFo2SBmcm9tYm9keSZ4")
+
+    def test_last_resort_is_client_state(self):
+        state = self._run("<html>nothing here</html>")
+        self.assertTrue(state)
+        self.assertNotIn("hKFo", state)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,10 +13,10 @@
 | 3 | Trae | ✅ 建成 | 34.5s | 账号建成；平台不下发 API token（IDE 型产品） |
 | 4 | Anything | ❌ | 11.8s | 盾已过（错误从 `Missing Turnstile token` 变成 `SIGNUP_DISABLED`），**站点临时关闭邮箱注册** |
 | 5 | Cerebras | ❌ | 1.3s | 认证迁到 **reCAPTCHA**，且 Stytch 强制移动端标识；cfsolve 只解 Turnstile |
-| 6 | Tavily | ❌ | 130.4s | Auth0 流程失效，三个自有域名均收不到信 |
-| 7 | Grok | ❌ | 120.7s | 收不到验证码（同上，邮箱侧被拦） |
-| 8 | ChatGPT | ❌ | 123.2s | 收不到验证码（同上） |
-| 9 | Kiro | ❌ | 2.9s | `获取wsh失败` —— AWS WAF，非 Cloudflare |
+| 6 | Tavily | ❌ | 130.4s | **上游 Auth0 流程 bug**：`step1_authorize` 只从 `location` 头取 state，重定向被自动跟随导致失配，回退成自己编的 client state → `/u/signup/identifier` 返回 400 `invalid_request`，**信从未被触发** |
+| 7 | Grok | ❌ | 120.7s | 收不到验证码（未验证是投递失败还是流程没触发） |
+| 8 | ChatGPT | ❌ | 123.2s | 收不到验证码（同上，未验证） |
+| 9 | Kiro | ❌ | 2.9s | 重定向链里 `无orchestrator_id` —— AWS 改了登录页结构，插件解析规则过期 |
 | 10 | Windsurf | ❌ | 31.5s | 上游改版为 Devin，`401 missing X-Devin-Auth1-Token` |
 | 11 | OpenBlock Labs | ❌ | 10.8s | Cloudflare 403，`initiate_signup failed` |
 
@@ -43,11 +43,17 @@
 - `platforms/anything/protocol_mailbox.py`：注入 `captcha_solver`，sitekey `0x4AAAAAAC1rJXwzHsS7ZTMm`。
 - 效果：错误从 `Missing Turnstile token` 变为 `SIGNUP_DISABLED: Email signup is temporarily disabled`。**整合层已通，卡在站点策略。**
 
-### 3. mailcatch 邮箱 provider 的链接提取
+### 4. Tavily 的 state 提取（部分修复）
+
+`step1_authorize` 只从 `location` 头找 state，但 `ProtocolExecutor` 会自动跟随重定向，头里压根没有 state，于是回退成自己拼的 client state（58 字符 `{"returnTo":...}`），拿去 POST `/u/signup/identifier` 必然 400 `invalid_request`。
+
+改成依次从 `location` → 响应正文 → `name="state"` 隐藏字段提取，实测能拿到 175 字符的真实事务 state（`hKFo2SA...`）。但修好后 identifier 提交仍被拒（`/u/login/identifier` 回 200 重渲染、`/u/signup/identifier` 回 400），疑似 Turnstile token 与 state 绑定，需继续逆。
+
+### 5. mailcatch 邮箱 provider 的链接提取
 
 `wait_for_link` 原来对 keyword 是硬过滤，blink 的链接里不含 `magic_token` 字面量就会漏信。改成**软匹配**：优先带关键词的链接，找不到退回第一条。
 
-### 4. 新增 7 项单测
+### 6. 新增 7 项单测
 
 `tests/test_captcha_wiring.py` 覆盖 blink/anything 的 token 注入、空值不带字段、worker 解盾调用、无 solver 时降级。
 
@@ -73,9 +79,16 @@ magpie 里 `moonmath` provider 当前状态（已实测可用）：
 
 ## 四、为什么 8 个平台跑不通（根因分类）
 
-1. **上游改版，插件过期**（4 个）：Windsurf→Devin、Cerebras→reCAPTCHA、Tavily Auth0 流程、Kiro AWS WAF。
+> 修正：早前把 Tavily/ChatGPT/Grok 的"收不到信"归因为域名被对端过滤，这个结论对 Tavily 是**错的**。深挖后确认 Tavily 是上游流程 bug，邮箱提交根本没成功，信从未被触发。ChatGPT/Grok 尚未验证到同等深度。
+
+1. **上游流程/改版过期**（5 个）：
+   - Tavily —— `step1_authorize` 从 `location` 头取 state，但 `ProtocolExecutor` 自动跟随重定向，头里没有 state，于是回退成自编的 client state，`/u/signup/identifier` 必然 400 `invalid_request`。已修（改从 HTML 隐藏字段 `name="state"` 提取，实测拿到 175 字符的真实事务 state），但修好后 identifier 提交仍被拒——疑似 Turnstile token 与 state 绑定，需进一步逆。
+   - Kiro —— 重定向链里拿不到 `orchestrator_id`，AWS 登录页结构变了。
+   - Windsurf —— 切到 Devin，新增 `X-Devin-Auth1-Token` 头。
+   - Cerebras —— 认证迁到 reCAPTCHA + Stytch 强制移动端标识。
+   - OpenBlock Labs —— Cloudflare 403。
 2. **站点主动关闭注册**（1 个）：Anything 邮箱注册 disabled。
-3. **收不到验证邮件**（3 个）：ChatGPT / Grok / Tavily。已排除域名因素——`ping1.pp.ua`、`tany.de5.net`、`pip3.pp.ua` 三个域都试过，全部无信；而同期 MoonMath / Blink / Trae 秒收。说明是对端过滤，不是投递问题。
+3. **未验证**（2 个）：ChatGPT / Grok 收不到验证码。三个自有域名（`ping1.pp.ua`、`tany.de5.net`、`pip3.pp.ua`）都试过全部无信，但这只能证明"没收到信"，不能区分是投递被拦还是流程没触发发送。
 4. **站点商业化收紧**（1 个）：MoonMath 新号不给 key。
 
 ## 五、结论
@@ -86,4 +99,4 @@ cfsolve 作为 captcha provider 的整合本身是有效的：它把 Blink 从�
 - 免费 TLD 域名被主流邮箱风控拉黑；
 - 站点把免费额度/API key 收紧成付费墙。
 
-要让更多渠道进 magpie，优先级应该是：**买一个正规 .com 域名做邮箱 → 修 Cerebras（reCAPTCHA，需换求解器）→ 修 Windsurf/Devin**。这三件里前两件收益最大。
+要让更多渠道进 magpie，优先级应该是：**修 Cerebras（换 reCAPTCHA 求解器）→ 修 Windsurf/Devin → 修 Kiro 的 orchestrator_id 解析**。买正规 .com 域名这条，在 Tavily 上已被证伪（问题在流程不在域名），对 ChatGPT/Grok 仍待验证，不该当成首要投入。
