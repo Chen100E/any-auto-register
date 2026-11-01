@@ -15,7 +15,7 @@
 | 5 | Cerebras | ❌ | 1.3s | 认证迁到 **reCAPTCHA**，且 Stytch 强制移动端标识；cfsolve 只解 Turnstile |
 | 6 | Tavily | ❌ | 130.4s | **上游 Auth0 流程 bug**：`step1_authorize` 只从 `location` 头取 state，重定向被自动跟随导致失配，回退成自己编的 client state → `/u/signup/identifier` 返回 400 `invalid_request`，**信从未被触发** |
 | 7 | Grok | ❌ | 120.7s | 收不到验证码（未验证是投递失败还是流程没触发） |
-| 8 | ChatGPT | ❌ | 123.2s | 收不到验证码（同上，未验证） |
+| 8 | ChatGPT | ❌ | 123.2s | **发码成功但收不到信**：强制调用 send_otp 返回 200，120s 内无投递 → 对端过滤 |
 | 9 | Kiro | ❌ | 2.9s | 重定向链里 `无orchestrator_id` —— AWS 改了登录页结构，插件解析规则过期 |
 | 10 | Windsurf | ❌ | 31.5s | 上游改版为 Devin，`401 missing X-Devin-Auth1-Token` |
 | 11 | OpenBlock Labs | ❌ | 10.8s | Cloudflare 403，`initiate_signup failed` |
@@ -88,7 +88,9 @@ magpie 里 `moonmath` provider 当前状态（已实测可用）：
    - Cerebras —— 认证迁到 reCAPTCHA + Stytch 强制移动端标识。
    - OpenBlock Labs —— Cloudflare 403。
 2. **站点主动关闭注册**（1 个）：Anything 邮箱注册 disabled。
-3. **未验证**（2 个）：ChatGPT / Grok 收不到验证码。三个自有域名（`ping1.pp.ua`、`tany.de5.net`、`pip3.pp.ua`）都试过全部无信，但这只能证明"没收到信"，不能区分是投递被拦还是流程没触发发送。
+3. **收不到验证码，已区分两种成因**（2 个）：
+   - **ChatGPT —— 确认是对端过滤**：插件把任何 `email_otp_verification` 页面都判成"已注册账号"并跳过 `_send_verification_code()`。用 `CHATGPT_FORCE_SEND_OTP=1` 强制补发后，`send_otp` 返回 **200**（OpenAI 接受了请求），120s 内仍无投递。说明发码链路是通的，是 OpenAI 不往这个域名投信。**换正规域名对 ChatGPT 有效。**
+   - **Grok —— 仍未验证**：日志显示"验证码已发送"但没到，尚未做同等深度的强制发码验证。
 4. **站点商业化收紧**（1 个）：MoonMath 新号不给 key。
 
 ## 五、结论
@@ -99,4 +101,4 @@ cfsolve 作为 captcha provider 的整合本身是有效的：它把 Blink 从�
 - 免费 TLD 域名被主流邮箱风控拉黑；
 - 站点把免费额度/API key 收紧成付费墙。
 
-要让更多渠道进 magpie，优先级应该是：**修 Cerebras（换 reCAPTCHA 求解器）→ 修 Windsurf/Devin → 修 Kiro 的 orchestrator_id 解析**。买正规 .com 域名这条，在 Tavily 上已被证伪（问题在流程不在域名），对 ChatGPT/Grok 仍待验证，不该当成首要投入。
+要让更多渠道进 magpie，优先级应该是：**换正规 .com 域名（ChatGPT 已证实发码 200 但不投递，换域名直接解锁）→ 修 Cerebras（换 reCAPTCHA 求解器）→ 修 Windsurf/Devin → 修 Kiro 的 orchestrator_id 解析**。Tavily 那条已证伪（问题在 state 提取，不在域名），修域名对它没用。
