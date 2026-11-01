@@ -29,6 +29,10 @@ OTP_TIMEOUT = int(os.getenv("OTP_TIMEOUT", "150"))
 CAPTCHA_SOLVER = os.getenv("CAPTCHA_SOLVER", "cfsolve")
 MAIL_DOMAIN = os.getenv("MAIL_DOMAIN", "").strip()
 
+# 站点按邮箱域名判 free plan：ping1.pp.ua 被判一次性邮箱，建 key 直接 402；
+# pip3.pp.ua 能正常拿免费 key。moonmath 默认走 pip3（MAIL_DOMAIN 仍可覆盖）。
+PLATFORM_MAIL_DOMAIN = {"moonmath": "pip3.pp.ua"}
+
 
 def resolve_mail_provider() -> str:
     """MAIL_PROVIDER 显式指定 -> 设置页的默认 mailbox。"""
@@ -47,11 +51,12 @@ def resolve_mail_provider() -> str:
 MAIL_PROVIDER = resolve_mail_provider()
 
 
-def build_mailbox():
+def build_mailbox(platform: str = ""):
     """内置 provider 走 create_mailbox 工厂，自注册 provider 走 create_provider。"""
     from core.base_mailbox import MAILBOX_FACTORY_REGISTRY, create_mailbox
 
-    overrides = {"cfworker_domain": MAIL_DOMAIN} if MAIL_DOMAIN else None
+    domain = MAIL_DOMAIN or PLATFORM_MAIL_DOMAIN.get(platform, "")
+    overrides = {"cfworker_domain": domain} if domain else None
     if MAIL_PROVIDER in MAILBOX_FACTORY_REGISTRY:
         return create_mailbox(MAIL_PROVIDER, overrides)
     settings = ProviderSettingsRepository()
@@ -97,7 +102,7 @@ def run_one(name: str) -> dict:
             "moonmath_key_alias": "live-test",
         },
     )
-    platform = cls(config=config, mailbox=build_mailbox())
+    platform = cls(config=config, mailbox=build_mailbox(name))
     platform.set_logger(lambda msg: print(f"    {msg}", flush=True))
 
     started = time.time()
