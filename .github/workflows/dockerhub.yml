@@ -20,6 +20,30 @@ env:
   IMAGE: baiyichen/any-auto-register
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 守卫：构建上下文里不许有数据库或凭据
+        run: |
+          set -euo pipefail
+          # 用一份探针 Dockerfile 真实走一遍 COPY . /ctx，
+          # .dockerignore 的语义跟正式构建完全一致，比 grep 可靠。
+          printf 'FROM alpine:3.20\nCOPY . /ctx\n' > /tmp/ctx.Dockerfile
+          docker build -f /tmp/ctx.Dockerfile -t ctx-probe . > /dev/null
+          PATTERNS="-name '*.db' -o -name '*.db-journal' -o -name '*.sqlite' -o -name '*.sqlite3' -o -name '.env' -o -name '*.pem' -o -name '*.key' -o -name 'results.jsonl' -o -name '.gh_token' -o -name '.askpass' -o -name '.deploy_secrets'"
+          echo "== 上下文里的可疑文件 =="
+          docker run --rm ctx-probe sh -c "find /ctx -type f \( $PATTERNS \) -print" | tee /tmp/bad.txt
+          if [ -s /tmp/bad.txt ]; then
+            echo "::error::构建上下文里混进了数据库/凭据，已停止构建（检查 .dockerignore）"
+            exit 1
+          fi
+          echo "✓ 上下文干净：没有 .db / .env / 密钥 / 账号导出"
+
   meta:
     runs-on: ubuntu-latest
     outputs:
@@ -40,7 +64,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/cfsolve-moonmath' }}
 
   build:
-    needs: meta
+    needs: [guard, meta]
     strategy:
       fail-fast: false
       matrix:
