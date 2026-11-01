@@ -23,6 +23,7 @@ _LAZY_IMPORTS = {
     "TwoCaptcha": "providers.captcha.twocaptcha",
     "ManualCaptcha": "providers.captcha.manual",
     "LocalSolverCaptcha": "providers.captcha.local_solver",
+    "CfsolveCaptcha": "providers.captcha.cfsolve",
 }
 
 
@@ -68,6 +69,7 @@ def create_captcha_solver(provider_key: str, extra: dict | None = None) -> BaseC
     from infrastructure.provider_definitions_repository import ProviderDefinitionsRepository
     from infrastructure.provider_settings_repository import ProviderSettingsRepository
     from providers.captcha.local_solver import LocalSolverCaptcha
+    from providers.captcha.cfsolve import CfsolveCaptcha
     from providers.captcha.manual import ManualCaptcha
     from providers.captcha.twocaptcha import TwoCaptcha
     from providers.captcha.yescaptcha import YesCaptcha
@@ -84,6 +86,8 @@ def create_captcha_solver(provider_key: str, extra: dict | None = None) -> BaseC
 
     if driver_type == "local_solver":
         return LocalSolverCaptcha(str(merged.get("solver_url", "") or ""))
+    if driver_type == "cfsolve":
+        return CfsolveCaptcha.from_config(merged)
     if driver_type == "yescaptcha_api":
         client_key = str(merged.get("yescaptcha_key", "") or "")
         if not client_key:
