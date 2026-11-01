@@ -1104,6 +1104,13 @@ def extract_verification_code(raw: str, code_pattern: str | None = None) -> str:
     body = _CODE_LONGNUM_RE.sub(" ", body)
     body = _re.sub(r"m=\+\d+\.\d+", " ", body)
     body = _re.sub(r"\bt=\d+\b", " ", body)
+    # 去掉样式噪声：CSS 颜色（#111314）和 style 属性里的数字会被误当成验证码。
+    # Trae 这类模板把真码放在 <span style="...color:#111314...">873412</span>，
+    # 不剥样式就会取到色值。
+    body = _re.sub(r"(?is)<style[^>]*>.*?</style>", " ", body)
+    body = _re.sub(r"""(?is)style\s*=\s*"[^"]*" """.strip(), " ", body)
+    body = _re.sub(r"""(?is)style\s*=\s*'[^']*' """.strip(), " ", body)
+    body = _re.sub(r"#[0-9A-Fa-f]{3,8}\b", " ", body)
 
     if code_pattern:
         hit = _re.search(code_pattern, body)
