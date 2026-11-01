@@ -13,7 +13,8 @@ from platforms.anything.core import (
     summarize_anything_account_state,
 )
 
-# anything.com 注册页的 Turnstile sitekey（从首页 JS 包提取）
+# anything.com 注册页的 Turnstile sitekey 默认值（从首页 JS 包提取）。
+# 站点改版后可通过 extra["anything_sitekey"] 或环境变量 ANYTHING_TURNSTILE_SITEKEY 覆盖。
 ANYTHING_TURNSTILE_SITEKEY = "0x4AAAAAAC1lWjs4uSHxIEFw"
 
 
@@ -24,18 +25,20 @@ class AnythingProtocolMailboxWorker:
         proxy: str | None = None,
         log_fn: Callable[[str], None] = print,
         captcha_solver: object | None = None,
+        sitekey: str = "",
+        signup_page: str = "",
     ):
         self.client = AnythingClient(proxy=proxy, log_fn=log_fn)
         self.log = log_fn
         self.captcha_solver = captcha_solver
+        self.sitekey = (sitekey or "").strip() or ANYTHING_TURNSTILE_SITEKEY
+        self.signup_page = (signup_page or "").strip() or f"{ANYTHING_BASE}/signup"
 
     def _solve_turnstile(self) -> str:
         if self.captcha_solver is None:
             return ""
-        self.log("解 Turnstile（anything 注册接口要求）...")
-        token = self.captcha_solver.solve_turnstile(
-            f"{ANYTHING_BASE}/signup", ANYTHING_TURNSTILE_SITEKEY
-        )
+        self.log(f"解 Turnstile（anything 注册接口要求，sitekey={self.sitekey}）...")
+        token = self.captcha_solver.solve_turnstile(self.signup_page, self.sitekey)
         self.log(f"Turnstile token: {len(token)} 字符")
         return token
 

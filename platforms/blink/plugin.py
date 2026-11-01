@@ -58,12 +58,32 @@ class BlinkPlatform(BasePlatform):
 
     def build_protocol_mailbox_adapter(self):
         def _build_worker(ctx, artifacts):
-            from platforms.blink.protocol_mailbox import BlinkProtocolMailboxWorker
+            from core.registration.helpers import resolve_setting
+            from platforms.blink.protocol_mailbox import (
+                BLINK_SIGNUP_PAGE,
+                BLINK_TURNSTILE_SITEKEY,
+                BlinkProtocolMailboxWorker,
+            )
 
+            extra = dict(getattr(ctx, "extra", None) or {})
+            sitekey = resolve_setting(
+                extra,
+                ("blink_sitekey", "blink_turnstile_sitekey"),
+                BLINK_TURNSTILE_SITEKEY,
+                env=("BLINK_TURNSTILE_SITEKEY",),
+            )
+            signup_page = resolve_setting(
+                extra,
+                ("blink_signup_page",),
+                BLINK_SIGNUP_PAGE,
+                env=("BLINK_SIGNUP_PAGE",),
+            )
             return BlinkProtocolMailboxWorker(
                 proxy=ctx.proxy,
                 log_fn=ctx.log,
                 captcha_solver=artifacts.captcha_solver,
+                sitekey=sitekey,
+                signup_page=signup_page,
             )
 
         def _run_worker(worker, ctx, artifacts):

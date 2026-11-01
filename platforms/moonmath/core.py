@@ -14,16 +14,16 @@ Clerk 的响应结构在不同版本间不一致（有时平铺、有时包一�
 """
 from __future__ import annotations
 
+import os
+
 import json
 import re
 from typing import Callable, Optional
 
-CLERK = "https://clerk.zro.moonmath.ai"
-ACCOUNTS = "https://accounts.zro.moonmath.ai"
-APP = "https://zro.moonmath.ai"
-
-CLERK_JS_VERSION = "6"
-
+CLERK = os.environ.get("MOONMATH_CLERK_BASE", "").strip() or "https://clerk.zro.moonmath.ai"
+ACCOUNTS = os.environ.get("MOONMATH_ACCOUNTS_BASE", "").strip() or "https://accounts.zro.moonmath.ai"
+APP = os.environ.get("MOONMATH_APP_BASE", "").strip() or "https://zro.moonmath.ai"
+CLERK_JS_VERSION = os.environ.get("MOONMATH_CLERK_JS_VERSION", "").strip() or "6"
 #: 站点在 402 时给的新号门槛文案
 PLAN_REQUIRED_MARKER = "active plan or usage pack"
 

@@ -1,14 +1,13 @@
+import os
 """Tavily 注册协议核心实现 (Auth0 流程)"""
 import re, json, secrets, hashlib, base64, urllib.parse
 from typing import Optional, Callable
 
-AUTH0_CLIENT_ID   = "RRIAvvXNFxpfTWIozX1mXqLnyUmYSTrQ"
-AUTH0_BASE        = "https://auth.tavily.com"
-APP_BASE          = "https://app.tavily.com"
-REDIRECT_URI      = "https://app.tavily.com/api/auth/callback"
-TURNSTILE_SITEKEY = "0x4AAAAAAAQFNSW6xordsuIq"
-
-
+AUTH0_CLIENT_ID   = os.environ.get("TAVILY_AUTH0_CLIENT_ID", "").strip() or "RRIAvvXNFxpfTWIozX1mXqLnyUmYSTrQ"
+AUTH0_BASE        = os.environ.get("TAVILY_AUTH0_BASE", "").strip() or "https://auth.tavily.com"
+APP_BASE          = os.environ.get("TAVILY_APP_BASE", "").strip() or "https://app.tavily.com"
+REDIRECT_URI      = os.environ.get("TAVILY_REDIRECT_URI", "").strip() or "https://app.tavily.com/api/auth/callback"
+TURNSTILE_SITEKEY = os.environ.get("TAVILY_TURNSTILE_SITEKEY", "").strip() or "0x4AAAAAAAQFNSW6xordsuIq"
 class TavilyRegister:
     def __init__(self, executor, captcha, log_fn: Callable = print):
         self.ex = executor

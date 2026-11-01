@@ -7,6 +7,8 @@ cfsolve 用一个固定的设备指纹在协议层回答 Cloudflare 下发的挑
 """
 from __future__ import annotations
 
+import os
+
 import re
 import shutil
 import subprocess
@@ -16,9 +18,8 @@ from core.base_captcha import BaseCaptcha
 from providers.registry import register_provider
 
 #: 未配置时的兜底路径（ci13 上的部署位置）
-DEFAULT_BINARY = "/app/working/cfsolve/run_challenge.sh"
-DEFAULT_FINGERPRINT = "/app/working/cfsolve/profiles/safari-26-ios.json"
-
+DEFAULT_BINARY = os.environ.get("CFSOLVE_BIN", "").strip() or "/app/working/cfsolve/run_challenge.sh"
+DEFAULT_FINGERPRINT = os.environ.get("CFSOLVE_FP", "").strip() or "/app/working/cfsolve/profiles/safari-26-ios.json"
 #: 命中这些错误说明是 api.js 构建不可解，重试会落到别的构建上
 RETRYABLE_MARKERS = (
     "does not build the key transform",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+import os
+from typing import Any, Callable
 
 from core.base_sms import create_phone_callbacks
 
@@ -18,6 +19,42 @@ def resolve_timeout(extra: dict[str, Any], keys: tuple[str, ...], default: int) 
         if value not in (None, ""):
             return int(value)
     return int(default)
+
+
+def resolve_setting(
+    extra: dict[str, Any] | None,
+    keys: tuple[str, ...],
+    default: Any,
+    *,
+    env: tuple[str, ...] = (),
+    cast: Callable[[Any], Any] = str,
+) -> Any:
+    """解析站点侧会变的常量（sitekey / client_id / 端点等）。
+
+    优先级：extra 显式配置 -> 环境变量 -> 默认值。
+    站点改版时改配置即可，不用动源码。
+    """
+    for key in keys:
+        value = (extra or {}).get(key)
+        if value not in (None, ""):
+            return cast(value)
+    for name in env:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return cast(value)
+    return default
+
+
+def resolve_flag(extra: dict[str, Any] | None, keys: tuple[str, ...], default: bool) -> bool:
+    """布尔配置：接受 1/0、true/false、yes/no、on/off。"""
+    for key in keys:
+        value = (extra or {}).get(key)
+        if value in (None, ""):
+            continue
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
+    return default
 
 
 def ensure_identity_email(ctx: RegistrationContext, message: str) -> None:

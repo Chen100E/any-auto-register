@@ -6,7 +6,8 @@ from typing import Callable, Optional
 
 from platforms.blink.core import BLINK_BASE, BLINK_PRICE_IDS, BlinkRegister, summarize_blink_account_state
 
-# blink.new 注册页的 Turnstile sitekey（从 /_next/static/chunks/142zxfid0swms.js 提取）
+# blink.new 注册页的 Turnstile sitekey 默认值（从 /_next/static/chunks/142zxfid0swms.js 提取）。
+# 站点改版后可通过 extra["blink_sitekey"] 或环境变量 BLINK_TURNSTILE_SITEKEY 覆盖。
 BLINK_TURNSTILE_SITEKEY = "0x4AAAAAACyVEYUXCeEWvxJe"
 BLINK_SIGNUP_PAGE = f"{BLINK_BASE}/sign-up"
 
@@ -18,18 +19,22 @@ class BlinkProtocolMailboxWorker:
         proxy: str | None = None,
         log_fn: Callable[[str], None] = print,
         captcha_solver: object | None = None,
+        sitekey: str = "",
+        signup_page: str = "",
     ):
         self.client = BlinkRegister(proxy=proxy)
         self.client._log = log_fn
         self.log = log_fn
         self.captcha_solver = captcha_solver
+        self.sitekey = (sitekey or "").strip() or BLINK_TURNSTILE_SITEKEY
+        self.signup_page = (signup_page or "").strip() or BLINK_SIGNUP_PAGE
 
     def _solve_turnstile(self) -> str:
         """解 blink 注册页的 Turnstile；没有 solver 时返回空串（旧行为）。"""
         if self.captcha_solver is None:
             return ""
-        self.log("解 Turnstile（blink 魔法链接接口要求）...")
-        token = self.captcha_solver.solve_turnstile(BLINK_SIGNUP_PAGE, BLINK_TURNSTILE_SITEKEY)
+        self.log(f"解 Turnstile（blink 魔法链接接口要求，sitekey={self.sitekey}）...")
+        token = self.captcha_solver.solve_turnstile(self.signup_page, self.sitekey)
         self.log(f"Turnstile token: {len(token)} 字符")
         return token
 

@@ -60,12 +60,24 @@ class AnythingPlatform(BasePlatform):
 
     def build_protocol_mailbox_adapter(self):
         def _build_worker(ctx, artifacts):
-            from platforms.anything.protocol_mailbox import AnythingProtocolMailboxWorker
+            from core.registration.helpers import resolve_setting
+            from platforms.anything.protocol_mailbox import (
+                ANYTHING_TURNSTILE_SITEKEY,
+                AnythingProtocolMailboxWorker,
+            )
 
+            extra = dict(getattr(ctx, "extra", None) or {})
+            sitekey = resolve_setting(
+                extra,
+                ("anything_sitekey", "anything_turnstile_sitekey"),
+                ANYTHING_TURNSTILE_SITEKEY,
+                env=("ANYTHING_TURNSTILE_SITEKEY",),
+            )
             return AnythingProtocolMailboxWorker(
                 proxy=ctx.proxy,
                 log_fn=ctx.log,
                 captcha_solver=artifacts.captcha_solver,
+                sitekey=sitekey,
             )
 
         def _run_worker(worker, ctx, artifacts):

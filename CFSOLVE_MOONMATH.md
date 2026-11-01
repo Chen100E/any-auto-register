@@ -144,3 +144,56 @@ session=sess_3LUvbgApwoD5jVDxLmEqRsMznwv user=user_3LUvbglK0XJePPIps3hdqX476DX
 
 `cfsolve` 无需任何 key，所以启用即用；填好路径后可以直接在
 provider 的测试按钮里验证。
+
+## 可配置项
+
+站点改版时不用改源码。解析优先级统一为：
+
+**`extra` 显式配置 → 环境变量 → 源码默认值**
+
+`extra` 指注册任务里的 `extra` 字典（与 `resolve_timeout` 同一套约定），
+新增的通用解析函数在 `core/registration/helpers.py`：
+
+```python
+from core.registration.helpers import resolve_setting, resolve_flag
+
+sitekey = resolve_setting(extra, ("blink_sitekey",), DEFAULT, env=("BLINK_TURNSTILE_SITEKEY",))
+enabled = resolve_flag(extra, ("blink_use_captcha",), True)
+```
+
+### 平台侧（`extra` 或环境变量）
+
+| 变量 | 配置键 | 环境变量 | 说明 |
+| --- | --- | --- | --- |
+| blink Turnstile sitekey | `blink_sitekey` / `blink_turnstile_sitekey` | `BLINK_TURNSTILE_SITEKEY` | 魔法链接接口的盾 |
+| blink 注册页 | `blink_signup_page` | `BLINK_SIGNUP_PAGE` | 解盾时加载的页面 |
+| anything Turnstile sitekey | `anything_sitekey` / `anything_turnstile_sitekey` | `ANYTHING_TURNSTILE_SITEKEY` | 注册 GraphQL 的盾 |
+
+### 模块常量（环境变量覆盖，原值作默认）
+
+| 变量 | 环境变量 | 文件 |
+| --- | --- | --- |
+| Firebase Web API Key | `BLINK_FIREBASE_API_KEY` | `platforms/blink/core.py` |
+| Auth0 client id | `TAVILY_AUTH0_CLIENT_ID` | `platforms/tavily/core.py` |
+| Auth0 域 | `TAVILY_AUTH0_BASE` | `platforms/tavily/core.py` |
+| Tavily 应用域 | `TAVILY_APP_BASE` | `platforms/tavily/core.py` |
+| 回调地址 | `TAVILY_REDIRECT_URI` | `platforms/tavily/core.py` |
+| Turnstile sitekey | `TAVILY_TURNSTILE_SITEKEY` | `platforms/tavily/core.py` |
+| Clerk FAPI 域 | `MOONMATH_CLERK_BASE` | `platforms/moonmath/core.py` |
+| Clerk 前端域 | `MOONMATH_ACCOUNTS_BASE` | `platforms/moonmath/core.py` |
+| 业务域 | `MOONMATH_APP_BASE` | `platforms/moonmath/core.py` |
+| Clerk JS 版本 | `MOONMATH_CLERK_JS_VERSION` | `platforms/moonmath/core.py` |
+| cfsolve 可执行文件 | `CFSOLVE_BIN` | `providers/captcha/cfsolve.py` |
+| cfsolve 指纹 | `CFSOLVE_FP` | `providers/captcha/cfsolve.py` |
+
+cfsolve / mailcatch 的其余参数（`timeout` / `retries` / `api_url` / `domain` /
+`prefix` / `poll_interval`）走 provider 设置页，落在
+`ProviderSettingsRepository`，与上面两套等价。
+
+批量驱动脚本 `run_all.py` 认 `DEFAULT_PW` / `OTP_TIMEOUT` / `RESULT_FILE`。
+
+### 测试
+
+`tests/test_configurable_constants.py`（23 项）：解析优先级、空值忽略、
+布尔解析、三个平台的 worker sitekey 注入、以及用子进程验证环境变量确实能
+覆盖模块常量（用 reload 会污染同进程内其他测试对模块级常量的引用，所以走子进程）。
